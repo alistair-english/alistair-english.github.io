@@ -1,0 +1,109 @@
+<html>
+
+<head>
+    <title>Devlog - Alistair English</title>
+    <style>
+        .post {
+            margin-bottom: 4em;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 2em;
+        }
+        .post:last-child {
+            border-bottom: none;
+        }
+        .post-date {
+            color: #666;
+            font-size: 0.9em;
+        }
+        .post-content img {
+            max-width: 100%;
+            height: auto;
+        }
+        #loading {
+            color: #666;
+            font-style: italic;
+        }
+        #error {
+            color: red;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Devlog</h1>
+    <p><a href="../index.html">← back home</a></p>
+
+    <div id="posts">
+        <p id="loading">Loading posts...</p>
+    </div>
+
+    <script>
+        const REPO = 'alistair-english/alistair-english.github.io';
+        const POSTS_PATH = 'devlog/posts';
+
+        async function loadPosts() {
+            const postsDiv = document.getElementById('posts');
+
+            try {
+                // Get list of files in posts directory
+                const listRes = await fetch(
+                    `https://api.github.com/repos/${REPO}/contents/${POSTS_PATH}`
+                );
+
+                if (!listRes.ok) {
+                    throw new Error(`Failed to list posts: ${listRes.status}`);
+                }
+
+                const files = await listRes.json();
+
+                // Filter to just .md files and sort by name (newest first assuming date prefix)
+                const mdFiles = files
+                    .filter(f => f.name.endsWith('.md'))
+                    .sort((a, b) => b.name.localeCompare(a.name));
+
+                if (mdFiles.length === 0) {
+                    postsDiv.innerHTML = '<p>No posts yet.</p>';
+                    return;
+                }
+
+                // Fetch and render each post
+                const posts = await Promise.all(mdFiles.map(async (file) => {
+                    const res = await fetch(
+                        `https://api.github.com/repos/${REPO}/contents/${POSTS_PATH}/${file.name}`,
+                        { headers: { 'Accept': 'application/vnd.github.html+json' } }
+                    );
+
+                    if (!res.ok) {
+                        return `<div class="post"><p>Failed to load ${file.name}</p></div>`;
+                    }
+
+                    const html = await res.text();
+
+                    // Extract date from filename (assumes YYYY-MM-DD-title.md format)
+                    const dateMatch = file.name.match(/^(\d{4}-\d{2}-\d{2})/);
+                    const dateStr = dateMatch ? dateMatch[1] : '';
+
+                    return `
+                        <article class="post">
+                            ${dateStr ? `<p class="post-date">${dateStr}</p>` : ''}
+                            <div class="post-content">${html}</div>
+                        </article>
+                    `;
+                }));
+
+                postsDiv.innerHTML = posts.join('');
+
+            } catch (err) {
+                postsDiv.innerHTML = `<p id="error">Error loading posts: ${err.message}</p>`;
+            }
+        }
+
+        loadPosts();
+    </script>
+</body>
+
+<footer>
+    <p><a href="../index.html">← back home</a></p>
+</footer>
+
+</html>
