@@ -41,6 +41,57 @@
         const REPO = 'alistair-english/alistair-english.github.io';
         const POSTS_PATH = 'devlog/posts';
 
+        // Auto-linking: keywords mapped to URLs.
+        // Only the first occurrence per post is linked.
+        // Case-insensitive matching, whole-word only.
+        const AUTO_LINKS = {
+            // 'keyword': 'https://example.com',
+            "cake": "https://github.com/greenforge-labs/cake",
+        };
+
+        function autoLink(html) {
+            if (Object.keys(AUTO_LINKS).length === 0) return html;
+
+            const container = document.createElement('div');
+            container.innerHTML = html;
+
+            for (const [keyword, url] of Object.entries(AUTO_LINKS)) {
+                const regex = new RegExp(`\\b(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\b`, 'i');
+                let found = false;
+
+                const walk = (node) => {
+                    if (found) return;
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        const match = node.textContent.match(regex);
+                        if (match) {
+                            const parts = node.textContent.split(regex);
+                            const frag = document.createDocumentFragment();
+                            for (let i = 0; i < parts.length; i++) {
+                                if (i === 1) {
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.textContent = parts[i];
+                                    frag.appendChild(a);
+                                    found = true;
+                                } else {
+                                    frag.appendChild(document.createTextNode(parts[i]));
+                                }
+                            }
+                            node.parentNode.replaceChild(frag, node);
+                        }
+                    } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName !== 'A') {
+                        for (const child of Array.from(node.childNodes)) {
+                            walk(child);
+                        }
+                    }
+                };
+
+                walk(container);
+            }
+
+            return container.innerHTML;
+        }
+
         async function loadPosts() {
             const postsDiv = document.getElementById('posts');
 
@@ -86,7 +137,7 @@
                     return `
                         <article class="post">
                             ${dateStr ? `<p class="post-date">${dateStr}</p>` : ''}
-                            <div class="post-content">${html}</div>
+                            <div class="post-content">${autoLink(html)}</div>
                         </article>
                     `;
                 }));
