@@ -9,21 +9,22 @@
             padding: 0 1.2em;
         }
 
-        .post {
-            margin-bottom: 4em;
-            border-bottom: 1px solid #ccc;
-            padding-bottom: 2em;
+        #posts-list {
+            list-style: none;
+            padding: 0;
         }
-        .post:last-child {
-            border-bottom: none;
+        #posts-list li {
+            margin-bottom: 0.5em;
         }
-        .post-date {
+        #posts-list a {
+            text-decoration: none;
+        }
+        #posts-list a:hover {
+            text-decoration: underline;
+        }
+        .post-list-date {
             color: #666;
             font-size: 0.9em;
-        }
-        .post-content img {
-            max-width: 100%;
-            height: auto;
         }
         #loading {
             color: #666;
@@ -31,11 +32,6 @@
         }
         #error {
             color: red;
-        }
-        .post-content .markdown-heading {
-            display: flex;
-            align-items: center;
-            gap: 0.4em;
         }
     </style>
 </head>
@@ -53,63 +49,52 @@
     <script>
         const REPO = 'alistair-english/alistair-english.github.io';
         const POSTS_PATH = 'devlog/posts';
+        const CACHE_KEY = 'devlog-list-cache';
+        const CACHE_MAX_AGE = 60 * 60 * 1000; // 1 hour
 
-        // Auto-linking: keywords mapped to URLs.
-        // Only the first occurrence per post is linked.
-        // Case-insensitive matching, whole-word only.
-        const AUTO_LINKS = {
-            // 'keyword': 'https://example.com',
-            "cake": "https://github.com/greenforge-labs/cake",
-        };
+        function getCachedList() {
+            try {
+                const raw = localStorage.getItem(CACHE_KEY);
+                if (!raw) return null;
+                const cached = JSON.parse(raw);
+                if (Date.now() - cached.timestamp < CACHE_MAX_AGE) {
+                    return cached.files;
+                }
+            } catch (e) {}
+            return null;
+        }
 
-        function autoLink(html) {
-            if (Object.keys(AUTO_LINKS).length === 0) return html;
+        function setCachedList(files) {
+            try {
+                localStorage.setItem(CACHE_KEY, JSON.stringify({ files, timestamp: Date.now() }));
+            } catch (e) {}
+        }
 
-            const container = document.createElement('div');
-            container.innerHTML = html;
-
-            for (const [keyword, url] of Object.entries(AUTO_LINKS)) {
-                const regex = new RegExp(`\\b(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\b`, 'i');
-                let found = false;
-
-                const walk = (node) => {
-                    if (found) return;
-                    if (node.nodeType === Node.TEXT_NODE) {
-                        const match = node.textContent.match(regex);
-                        if (match) {
-                            const parts = node.textContent.split(regex);
-                            const frag = document.createDocumentFragment();
-                            for (let i = 0; i < parts.length; i++) {
-                                if (i === 1) {
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.textContent = parts[i];
-                                    frag.appendChild(a);
-                                    found = true;
-                                } else {
-                                    frag.appendChild(document.createTextNode(parts[i]));
-                                }
-                            }
-                            node.parentNode.replaceChild(frag, node);
-                        }
-                    } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName !== 'A') {
-                        for (const child of Array.from(node.childNodes)) {
-                            walk(child);
-                        }
-                    }
-                };
-
-                walk(container);
+        function renderList(files) {
+            const postsDiv = document.getElementById('posts');
+            if (files.length === 0) {
+                postsDiv.innerHTML = '<p>No posts yet.</p>';
+                return;
             }
-
-            return container.innerHTML;
+            const items = files.map(f => {
+                const dateMatch = f.name.match(/^(\d{4}-\d{2}-\d{2})/);
+                const dateStr = dateMatch ? dateMatch[1] : '';
+                const label = f.title
+                    ? `${f.title}${dateStr ? ` <span class="post-list-date">&mdash; ${dateStr}</span>` : ''}`
+                    : f.name;
+                return `<li><a href="post.html?p=${encodeURIComponent(f.name)}">${label}</a></li>`;
+            }).join('');
+            postsDiv.innerHTML = `<ul id="posts-list">${items}</ul>`;
         }
 
         async function loadPosts() {
-            const postsDiv = document.getElementById('posts');
+            const cached = getCachedList();
+            if (cached) {
+                renderList(cached);
+                return;
+            }
 
             try {
-                // Get list of files in posts directory
                 const listRes = await fetch(
                     `https://api.github.com/repos/${REPO}/contents/${POSTS_PATH}`
                 );
@@ -120,45 +105,30 @@
 
                 const files = await listRes.json();
 
-                // Filter to just .md files and sort by name (newest first assuming date prefix)
                 const mdFiles = files
                     .filter(f => f.name.endsWith('.md'))
                     .sort((a, b) => b.name.localeCompare(a.name));
 
-                if (mdFiles.length === 0) {
-                    postsDiv.innerHTML = '<p>No posts yet.</p>';
-                    return;
-                }
-
-                // Fetch and render each post
-                const posts = await Promise.all(mdFiles.map(async (file) => {
-                    const res = await fetch(
-                        `https://api.github.com/repos/${REPO}/contents/${POSTS_PATH}/${file.name}`,
-                        { headers: { 'Accept': 'application/vnd.github.html+json' } }
-                    );
-
-                    if (!res.ok) {
-                        return `<div class="post"><p>Failed to load ${file.name}</p></div>`;
-                    }
-
-                    const html = await res.text();
-
-                    // Extract date from filename (assumes YYYY-MM-DD-title.md format)
-                    const dateMatch = file.name.match(/^(\d{4}-\d{2}-\d{2})/);
-                    const dateStr = dateMatch ? dateMatch[1] : '';
-
-                    return `
-                        <article class="post">
-                            ${dateStr ? `<p class="post-date">${dateStr}</p>` : ''}
-                            <div class="post-content">${autoLink(html)}</div>
-                        </article>
-                    `;
+                // Fetch raw markdown for each file to extract the title from the first line
+                const filesWithTitles = await Promise.all(mdFiles.map(async (file) => {
+                    try {
+                        const res = await fetch(file.download_url);
+                        if (res.ok) {
+                            const text = await res.text();
+                            const firstLine = text.split('\n')[0];
+                            const titleMatch = firstLine.match(/^#\s+(.+)/);
+                            return { name: file.name, title: titleMatch ? titleMatch[1].trim() : file.name };
+                        }
+                    } catch (e) {}
+                    return { name: file.name, title: file.name };
                 }));
 
-                postsDiv.innerHTML = posts.join('');
+                setCachedList(filesWithTitles);
+                renderList(filesWithTitles);
 
             } catch (err) {
-                postsDiv.innerHTML = `<p id="error">Error loading posts: ${err.message}</p>`;
+                document.getElementById('posts').innerHTML =
+                    `<p id="error">Error loading posts: ${err.message}</p>`;
             }
         }
 

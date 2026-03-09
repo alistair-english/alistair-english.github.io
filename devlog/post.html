@@ -1,0 +1,135 @@
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Devlog - Alistair English</title>
+    <style>
+        body {
+            padding: 0 1.2em;
+        }
+
+        .post-date {
+            color: #666;
+            font-size: 0.9em;
+        }
+        .post-content img {
+            max-width: 100%;
+            height: auto;
+        }
+        #loading {
+            color: #666;
+            font-style: italic;
+        }
+        #error {
+            color: red;
+        }
+        .post-content .markdown-heading a {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <p><a href="index.html">&larr; back to devlog</a></p>
+
+    <div id="post">
+        <p id="loading">Loading post...</p>
+    </div>
+
+    <script>
+        const REPO = 'alistair-english/alistair-english.github.io';
+        const POSTS_PATH = 'devlog/posts';
+
+        const AUTO_LINKS = {
+            "cake": "https://github.com/greenforge-labs/cake",
+        };
+
+        function autoLink(html) {
+            if (Object.keys(AUTO_LINKS).length === 0) return html;
+
+            const container = document.createElement('div');
+            container.innerHTML = html;
+
+            for (const [keyword, url] of Object.entries(AUTO_LINKS)) {
+                const regex = new RegExp(`\\b(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})\\b`, 'i');
+                let found = false;
+
+                const walk = (node) => {
+                    if (found) return;
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        const match = node.textContent.match(regex);
+                        if (match) {
+                            const parts = node.textContent.split(regex);
+                            const frag = document.createDocumentFragment();
+                            for (let i = 0; i < parts.length; i++) {
+                                if (i === 1) {
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.textContent = parts[i];
+                                    frag.appendChild(a);
+                                    found = true;
+                                } else {
+                                    frag.appendChild(document.createTextNode(parts[i]));
+                                }
+                            }
+                            node.parentNode.replaceChild(frag, node);
+                        }
+                    } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName !== 'A') {
+                        for (const child of Array.from(node.childNodes)) {
+                            walk(child);
+                        }
+                    }
+                };
+
+                walk(container);
+            }
+
+            return container.innerHTML;
+        }
+
+        async function loadPost() {
+            const postDiv = document.getElementById('post');
+            const params = new URLSearchParams(window.location.search);
+            const filename = params.get('p');
+
+            if (!filename) {
+                postDiv.innerHTML = '<p id="error">No post specified.</p>';
+                return;
+            }
+
+            try {
+                const res = await fetch(
+                    `https://api.github.com/repos/${REPO}/contents/${POSTS_PATH}/${filename}`,
+                    { headers: { 'Accept': 'application/vnd.github.html+json' } }
+                );
+
+                if (!res.ok) {
+                    throw new Error(`Failed to load post: ${res.status}`);
+                }
+
+                const html = await res.text();
+
+                const dateMatch = filename.match(/^(\d{4}-\d{2}-\d{2})/);
+                const dateStr = dateMatch ? dateMatch[1] : '';
+
+                postDiv.innerHTML = `
+                    <article>
+                        ${dateStr ? `<p class="post-date">${dateStr}</p>` : ''}
+                        <div class="post-content">${autoLink(html)}</div>
+                    </article>
+                `;
+            } catch (err) {
+                postDiv.innerHTML = `<p id="error">Error loading post: ${err.message}</p>`;
+            }
+        }
+
+        loadPost();
+    </script>
+</body>
+
+<footer>
+    <p><a href="index.html">&larr; back to devlog</a></p>
+</footer>
+
+</html>
